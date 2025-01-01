@@ -7,3 +7,5 @@ PSX.Dev-README.md
 *.o
 *.a
 third_party/psyq
+*.ISO
+*.CUE
