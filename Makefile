@@ -6,7 +6,8 @@ third_party/nugget/common/crt0/crt0.s \
 main.c \
 joypad.c \
 globals.c \
-display.c 
+display.c \
+camera.c
 
 CPPFLAGS += -Ithird_party/psyq-iwyu/include
 LDFLAGS += -Lthird_party/psyq/lib

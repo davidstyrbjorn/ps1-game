@@ -6,6 +6,7 @@
 #include "joypad.h"
 #include "globals.h"
 #include "display.h"
+#include "camera.h"
 
 #define NUM_VERTICES 8
 #define NUM_FACES 6
@@ -46,6 +47,8 @@ typedef struct
 POLY_G4 *poly_g4;
 POLY_F3 *poly_f3;
 
+Camera camera;
+
 Cube cube_obj = {
     .rotation = {0, 0, 0},
     .position = {0, -400, 1800},
@@ -73,7 +76,7 @@ Floor floor_obj = {
     .faces = {0, 1, 2, 1, 3, 2}};
 
 MATRIX world = {0};
-MATRIX floor_world = {0};
+MATRIX view = {0};
 
 void Setup()
 {
@@ -82,6 +85,12 @@ void Setup()
   ResetNextPrimitive(GetCurrBuff());
 
   JoyPadInit();
+
+  VECTOR position = {500, -1000, -1000};
+  camera.position.vx = position.vx;
+  camera.position.vy = position.vy;
+  camera.position.vz = position.vz;
+  camera.look_at = (MATRIX){0};
 }
 
 short rotation_speed = ONE;
@@ -94,14 +103,31 @@ void Update()
   EmptyOT(GetCurrBuff()); // Clear OT
 
   JoyPadUpdate();
+
   if (JoyPadCheck(PAD1_LEFT))
   {
-    cube_obj.position.vx -= 10;
+    camera.position.vx -= 50;
   }
-  else if (JoyPadCheck(PAD1_RIGHT))
+  if (JoyPadCheck(PAD1_RIGHT))
   {
-    cube_obj.position.vx += 10;
+    camera.position.vx += 50;
   }
+  if (JoyPadCheck(PAD1_UP))
+  {
+    camera.position.vy -= 50;
+  }
+  if (JoyPadCheck(PAD1_DOWN))
+  {
+    camera.position.vy += 50;
+  }
+  // if (JoyPadCheck(PAD1_CROSS))
+  // {
+  //   camera.position.vz += 50;
+  // }
+  // if (JoyPadCheck(PAD1_CIRCLE))
+  // {
+  //   camera.position.vz -= 50;
+  // }
 
   // Update position based on acceleration, and velocity
   cube_obj.velocity.vx += cube_obj.acceleration.vx;
@@ -118,12 +144,18 @@ void Update()
     rotation_direction *= -1;
   }
 
+  // Compute the look at matrix for this cube
+  LookAt(&camera, &camera.position, &cube_obj.position, &(VECTOR){0, -ONE, 0});
+
   RotMatrix(&cube_obj.rotation, &world);
   TransMatrix(&world, &cube_obj.position);
   ScaleMatrix(&world, &cube_obj.scale);
 
-  SetRotMatrix(&world);
-  SetTransMatrix(&world);
+  // Combine world and look at matrix to get the... wait for it... view matrix
+  CompMatrixLV(&camera.look_at, &world, &view);
+
+  SetRotMatrix(&view);
+  SetTransMatrix(&view);
 
   // Loop all faces of the cube
   for (int i = 0; i < NUM_FACES * 4; i += 4)
@@ -160,8 +192,12 @@ void Update()
   RotMatrix(&floor_obj.rotation, &world);
   TransMatrix(&world, &floor_obj.position);
   ScaleMatrix(&world, &floor_obj.scale);
-  SetRotMatrix(&world);
-  SetTransMatrix(&world);
+
+  // Combine world and look at matrix to get the... wait for it... view matrix
+  CompMatrixLV(&camera.look_at, &world, &view);
+
+  SetRotMatrix(&view);
+  SetTransMatrix(&view);
 
   for (int i = 0; i < (2 * 3); i += 3)
   {

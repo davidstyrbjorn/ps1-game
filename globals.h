@@ -1,6 +1,8 @@
 #pragma once
 
 #include <types.h>
+#include <libgte.h>
+#include <libgpu.h>
 
 #define OT_LENGTH 8192
 #define PRIMITIVE_BUFFER_LENGTH 2048
