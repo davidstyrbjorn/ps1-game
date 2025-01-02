@@ -2,14 +2,17 @@
 #include <libgpu.h> // Double buffering, display control, drawing primitives, etc
 #include <libgte.h> // 3d transformations math etc
 #include <stdio.h>
+#include <libcd.h>
+#include <stdlib.h>
 
 #include "joypad.h"
 #include "globals.h"
 #include "display.h"
 #include "camera.h"
+#include "util.h"
+#include "object.h"
 
-#define NUM_VERTICES 8
-#define NUM_FACES 6
+extern char __heap_start, __sp; // Nugget specific, needed for malloc to work
 
 /*
     char c;  // -> 8 bits
@@ -35,62 +38,71 @@ typedef struct
   short faces[24];
 } Cube;
 
-typedef struct
-{
-  SVECTOR rotation;
-  VECTOR position;
-  VECTOR scale;
-  SVECTOR vertices[4];
-  short faces[6];
-} Floor;
+Object object = {};
 
-POLY_G4 *poly_g4;
-POLY_F3 *poly_f3;
+POLY_F4 *poly_f4;
 
 Camera camera;
-
-Cube cube_obj = {
-    .rotation = {0, 0, 0},
-    .position = {0, -400, 1800},
-    .scale = {ONE, ONE, ONE},
-    .velocity = {0, 0, 0},
-    .acceleration = {0, 1, 0},
-    .vertices = {
-        {-128, -128, -128}, {128, -128, -128}, {128, -128, 128}, {-128, -128, 128}, {-128, 128, -128}, {128, 128, -128}, {128, 128, 128}, {-128, 128, 128}},
-    .faces = {3, 2, 0, 1, // top quad
-              0, 1, 4, 5, // front quad
-              4, 5, 7, 6, // bottom quad
-              1, 2, 5, 6, // right quad
-              2, 3, 6, 7, // back quad
-              3, 0, 7, 4}};
-
-Floor floor_obj = {
-    .rotation = {0, 0, 0},
-    .position = {0, 450, 1800},
-    .scale = {ONE, ONE, ONE},
-    .vertices = {
-        {-FLOOR_SIZE, 0, -FLOOR_SIZE},
-        {-FLOOR_SIZE, 0, FLOOR_SIZE},
-        {FLOOR_SIZE, 0, -FLOOR_SIZE},
-        {FLOOR_SIZE, 0, FLOOR_SIZE}},
-    .faces = {0, 1, 2, 1, 3, 2}};
 
 MATRIX world = {0};
 MATRIX view = {0};
 
 void Setup()
 {
+  InitHeap3((unsigned long *)(&__heap_start), (&__sp - 0x5000) - &__heap_start);
   ScreenInit();
+  CdInit(); // Initialize CD subsystem
+  JoyPadInit();
 
   ResetNextPrimitive(GetCurrBuff());
-
-  JoyPadInit();
 
   VECTOR position = {500, -1000, -1000};
   camera.position.vx = position.vx;
   camera.position.vy = position.vy;
   camera.position.vz = position.vz;
   camera.look_at = (MATRIX){0};
+
+  // Create object (cube) from model file MODEL.BIN
+  setVector(&object.position, 0, 0, 0);
+  setVector(&object.rotation, 0, 0, 0);
+  setVector(&object.scale, ONE, ONE, ONE);
+
+  // Start reading from the file
+  u_long length;
+  char *bytes = FileRead("\\MODEL.BIN;1", &length);
+
+  // Read vertices from buffer
+  u_long b = 0; // Counter of bytes
+  object.num_vertices = GetShortBE(bytes, &b);
+  object.vertices = malloc3(object.num_vertices * sizeof(SVECTOR));
+  for (int i = 0; i < object.num_vertices; i++)
+  {
+    object.vertices[i].vx = GetShortBE(bytes, &b);
+    object.vertices[i].vy = GetShortBE(bytes, &b);
+    object.vertices[i].vz = GetShortBE(bytes, &b);
+  }
+
+  // Read indices from buffer
+  object.num_faces = GetShortBE(bytes, &b) * 4; // 4 indices per quad
+  object.faces = malloc3(object.num_faces * sizeof(short));
+  for (int i = 0; i < object.num_faces; i++)
+  {
+    object.faces[i] = GetShortBE(bytes, &b);
+  }
+
+  // Read colors from buffer
+  object.num_colors = GetChar(bytes, &b);
+  object.colors = malloc3(object.num_colors * sizeof(CVECTOR));
+  for (int i = 0; i < object.num_colors; i++)
+  {
+    object.colors[i].r = GetChar(bytes, &b);
+    object.colors[i].g = GetChar(bytes, &b);
+    object.colors[i].b = GetChar(bytes, &b);
+    object.colors[i].cd = GetChar(bytes, &b);
+  }
+
+  // Free the read file buffer
+  free3(bytes);
 }
 
 short rotation_speed = ONE;
@@ -120,36 +132,13 @@ void Update()
   {
     camera.position.vy += 50;
   }
-  // if (JoyPadCheck(PAD1_CROSS))
-  // {
-  //   camera.position.vz += 50;
-  // }
-  // if (JoyPadCheck(PAD1_CIRCLE))
-  // {
-  //   camera.position.vz -= 50;
-  // }
 
-  // Update position based on acceleration, and velocity
-  cube_obj.velocity.vx += cube_obj.acceleration.vx;
-  cube_obj.velocity.vy += cube_obj.acceleration.vy;
-  cube_obj.velocity.vz += cube_obj.acceleration.vz;
-  cube_obj.position.vx += cube_obj.velocity.vx / 2;
-  cube_obj.position.vy += cube_obj.velocity.vy / 2;
-  cube_obj.position.vz += cube_obj.velocity.vz / 2;
+  // Compute the look at matrix for object
+  LookAt(&camera, &camera.position, &object.position, &(VECTOR){0, -ONE, 0});
 
-  if (cube_obj.position.vy + 150 > floor_obj.position.vy)
-  {
-    cube_obj.velocity.vy *= -1;
-    rotation_speed = ONE;
-    rotation_direction *= -1;
-  }
-
-  // Compute the look at matrix for this cube
-  LookAt(&camera, &camera.position, &cube_obj.position, &(VECTOR){0, -ONE, 0});
-
-  RotMatrix(&cube_obj.rotation, &world);
-  TransMatrix(&world, &cube_obj.position);
-  ScaleMatrix(&world, &cube_obj.scale);
+  RotMatrix(&object.rotation, &world);
+  TransMatrix(&world, &object.position);
+  ScaleMatrix(&world, &object.scale);
 
   // Combine world and look at matrix to get the... wait for it... view matrix
   CompMatrixLV(&camera.look_at, &world, &view);
@@ -157,71 +146,31 @@ void Update()
   SetRotMatrix(&view);
   SetTransMatrix(&view);
 
-  // Loop all faces of the cube
-  for (int i = 0; i < NUM_FACES * 4; i += 4)
+  // Loop all faces of the object
+  for (int i = 0, q = 0; i < object.num_faces; i += 4, q++)
   {
-    poly_g4 = (POLY_G4 *)GetNextPrimitive();
-    SetPolyG4(poly_g4);
-    setRGB0(poly_g4, 255, 255, 0); // Set the color of the polygon
-    setRGB1(poly_g4, 255, 0, 255);
-    setRGB2(poly_g4, 0, 255, 255);
-    setRGB3(poly_g4, 100, 255, 100);
+    poly_f4 = (POLY_F4 *)GetNextPrimitive();
+    SetPolyF4(poly_f4);
+    setRGB0(poly_f4, object.colors[q].r, object.colors[q].g, object.colors[q].b); // Set the color of the polygon
 
     // This function will let us discard the polygon if it is ocluded (<= 0)
     int nclip =
-        RotAverageNclip4(&cube_obj.vertices[cube_obj.faces[i]], &cube_obj.vertices[cube_obj.faces[i + 1]],
-                         &cube_obj.vertices[cube_obj.faces[i + 2]], &cube_obj.vertices[cube_obj.faces[i + 3]], (long *)&poly_g4->x0,
-                         (long *)&poly_g4->x1, (long *)&poly_g4->x2, (long *)&poly_g4->x3, &p, &otz, &flag);
+        RotAverageNclip4(&object.vertices[object.faces[i]], &object.vertices[object.faces[i + 1]],
+                         &object.vertices[object.faces[i + 2]], &object.vertices[object.faces[i + 3]], (long *)&poly_f4->x0,
+                         (long *)&poly_f4->x1, (long *)&poly_f4->x2, (long *)&poly_f4->x3, &p, &otz, &flag);
     if (nclip <= 0)
     {
-      continue;
+      continue; // Discard pixel
     }
 
     if ((otz > 0) && (otz < OT_LENGTH))
     {
-      addPrim(GetOTAt(GetCurrBuff(), otz), poly_g4);
-      IncrementNextPrimitive(sizeof(POLY_G4));
+      addPrim(GetOTAt(GetCurrBuff(), otz), poly_f4);
+      IncrementNextPrimitive(sizeof(POLY_F4));
     }
   }
 
-  cube_obj.rotation.vy += (rotation_speed / (ONE / 30)) * rotation_direction;
-  rotation_speed -= ONE / 100;
-  rotation_speed = (rotation_speed < 0) ? 0 : rotation_speed;
-
-  // Floor
-  RotMatrix(&floor_obj.rotation, &world);
-  TransMatrix(&world, &floor_obj.position);
-  ScaleMatrix(&world, &floor_obj.scale);
-
-  // Combine world and look at matrix to get the... wait for it... view matrix
-  CompMatrixLV(&camera.look_at, &world, &view);
-
-  SetRotMatrix(&view);
-  SetTransMatrix(&view);
-
-  for (int i = 0; i < (2 * 3); i += 3)
-  {
-    poly_f3 = (POLY_F3 *)GetNextPrimitive();
-    setPolyF3(poly_f3);
-    setRGB0(poly_f3, 100, 100, 255);
-    int nclip = RotAverageNclip3(
-        &floor_obj.vertices[floor_obj.faces[i]], &floor_obj.vertices[floor_obj.faces[i + 1]],
-        &floor_obj.vertices[floor_obj.faces[i + 2]], (long *)&poly_f3->x0, (long *)&poly_f3->x1,
-        (long *)&poly_f3->x2, &p, &otz, &flag);
-
-    if (nclip <= 0)
-    {
-      continue;
-    }
-
-    if ((otz > 0) && (otz < OT_LENGTH))
-    {
-      addPrim(GetOTAt(GetCurrBuff(), otz), poly_f3);
-      IncrementNextPrimitive(sizeof(POLY_F3));
-    }
-  }
-
-  floor_obj.rotation.vy -= 3;
+  object.rotation.vy += 20;
 }
 
 void Render() { DisplayFrame(); }

@@ -7,7 +7,8 @@ main.c \
 joypad.c \
 globals.c \
 display.c \
-camera.c
+camera.c \
+util.c
 
 CPPFLAGS += -Ithird_party/psyq-iwyu/include
 LDFLAGS += -Lthird_party/psyq/lib

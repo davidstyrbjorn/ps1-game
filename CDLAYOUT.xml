@@ -19,8 +19,9 @@
         <directory_tree>
             <file name="SYSTEM.CNF"	type="data"	source="SYSTEM.TXT"/>
             <file name="MAIN.EXE"	type="data"	source="hello-gpu.ps-exe"/>
-            <file name="MODEL.BIN"  type="data" source="assets\MODEL.BIN"/>
+            <file name="MODEL.BIN"  type="data" source="assets\model.bin"/>
             
+            <!-- We can easily add subdirectories onto the disk by doing... this -->
             <!-- <dir name="SUBDIR01">
                 <file name="FILE1.TXT" type="data" source="assets\FILE1.TXT"/>
                 <file name="FILE2.TXT" type="data" source="assets\FILE2.TXT"/>

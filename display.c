@@ -32,8 +32,8 @@ void ScreenInit(void)
   screen.draw[1].isbg = 1;
 
   // Set the background clear color
-  setRGB0(&screen.draw[0], 255, 211, 62); // Weird piss color
-  setRGB0(&screen.draw[1], 255, 211, 62);
+  setRGB0(&screen.draw[0], 52, 21, 57);
+  setRGB0(&screen.draw[1], 52, 21, 57);
 
   // Set current initial buffer
   current_buffer = 0;
