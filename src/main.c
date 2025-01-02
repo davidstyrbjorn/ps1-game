@@ -40,36 +40,22 @@ typedef struct
 
 Object object = {};
 
-POLY_F4 *poly_f4;
+POLY_FT4 *poly_ft4;
 
 Camera camera;
 
 MATRIX world = {0};
 MATRIX view = {0};
 
-void Setup()
+u_long tim_mode; // pixel mode of the TIM
+RECT tim_prect;  // store the X and Y location of the texture
+RECT tim_crect;  // -||- CLUT
+
+void LoadModel(char *file_name)
 {
-  InitHeap3((unsigned long *)(&__heap_start), (&__sp - 0x5000) - &__heap_start);
-  ScreenInit();
-  CdInit(); // Initialize CD subsystem
-  JoyPadInit();
-
-  ResetNextPrimitive(GetCurrBuff());
-
-  VECTOR position = {500, -1000, -1000};
-  camera.position.vx = position.vx;
-  camera.position.vy = position.vy;
-  camera.position.vz = position.vz;
-  camera.look_at = (MATRIX){0};
-
-  // Create object (cube) from model file MODEL.BIN
-  setVector(&object.position, 0, 0, 0);
-  setVector(&object.rotation, 0, 0, 0);
-  setVector(&object.scale, ONE, ONE, ONE);
-
   // Start reading from the file
   u_long length;
-  char *bytes = FileRead("\\MODEL.BIN;1", &length);
+  char *bytes = FileRead(file_name, &length);
 
   // Read vertices from buffer
   u_long b = 0; // Counter of bytes
@@ -103,6 +89,59 @@ void Setup()
 
   // Free the read file buffer
   free3(bytes);
+}
+
+void LoadTexture(char *file_name)
+{
+  // Start reading from the file
+  u_long length;
+  TIM_IMAGE tim;
+  u_long b = 0; // Counter of bytes
+  u_long *bytes;
+
+  bytes = (u_long *)FileRead(file_name, &length);
+  OpenTIM(bytes);
+  ReadTIM(&tim);
+
+  LoadImage(tim.prect, tim.paddr); // This is ASYNC
+  DrawSync(0);                     // Wait for copy to VRAM to complete
+
+  int hasCLUT = tim.mode & 0x8;
+  if (hasCLUT)
+  {
+    LoadImage(tim.crect, tim.caddr); // This is ASYNC
+    DrawSync(0);                     // Wait for copy to VRAM to complete
+  }
+
+  tim_mode = tim.mode;
+  tim_prect = *tim.prect;
+  tim_crect = *tim.crect;
+
+  free3(bytes);
+}
+
+void Setup()
+{
+  InitHeap3((unsigned long *)(&__heap_start), (&__sp - 0x5000) - &__heap_start);
+  ScreenInit();
+  CdInit(); // Initialize CD subsystem
+  JoyPadInit();
+
+  ResetNextPrimitive(GetCurrBuff());
+
+  VECTOR position = {500, -1000, -1000};
+  camera.position.vx = position.vx;
+  camera.position.vy = position.vy;
+  camera.position.vz = position.vz;
+  camera.look_at = (MATRIX){0};
+
+  // Create object (cube) from model file MODEL.BIN
+  setVector(&object.position, 0, 0, 0);
+  setVector(&object.rotation, 0, 0, 0);
+  setVector(&object.scale, ONE, ONE, ONE);
+
+  LoadModel("\\MODEL.BIN;1");
+  LoadTexture("\\BRICKS.TIM;1");
 }
 
 short rotation_speed = ONE;
@@ -149,15 +188,34 @@ void Update()
   // Loop all faces of the object
   for (int i = 0, q = 0; i < object.num_faces; i += 4, q++)
   {
-    poly_f4 = (POLY_F4 *)GetNextPrimitive();
-    SetPolyF4(poly_f4);
-    setRGB0(poly_f4, object.colors[q].r, object.colors[q].g, object.colors[q].b); // Set the color of the polygon
+    poly_ft4 = (POLY_FT4 *)GetNextPrimitive();
+    SetPolyFT4(poly_ft4);
+
+    poly_ft4->r0 = 128;
+    poly_ft4->g0 = 128;
+    poly_ft4->b0 = 128;
+
+    // Setting our UV coordinates
+    poly_ft4->u0 = 0;
+    poly_ft4->v0 = 0;
+
+    poly_ft4->u1 = 63;
+    poly_ft4->v1 = 0;
+
+    poly_ft4->u2 = 0;
+    poly_ft4->v2 = 63;
+
+    poly_ft4->u3 = 63;
+    poly_ft4->v3 = 63;
+
+    poly_ft4->tpage = getTPage(tim_mode & 0x3, 0, tim_prect.x, tim_prect.y);
+    poly_ft4->clut = getClut(tim_crect.x, tim_crect.y);
 
     // This function will let us discard the polygon if it is ocluded (<= 0)
     int nclip =
         RotAverageNclip4(&object.vertices[object.faces[i]], &object.vertices[object.faces[i + 1]],
-                         &object.vertices[object.faces[i + 2]], &object.vertices[object.faces[i + 3]], (long *)&poly_f4->x0,
-                         (long *)&poly_f4->x1, (long *)&poly_f4->x2, (long *)&poly_f4->x3, &p, &otz, &flag);
+                         &object.vertices[object.faces[i + 2]], &object.vertices[object.faces[i + 3]], (long *)&poly_ft4->x0,
+                         (long *)&poly_ft4->x1, (long *)&poly_ft4->x2, (long *)&poly_ft4->x3, &p, &otz, &flag);
     if (nclip <= 0)
     {
       continue; // Discard pixel
@@ -165,8 +223,8 @@ void Update()
 
     if ((otz > 0) && (otz < OT_LENGTH))
     {
-      addPrim(GetOTAt(GetCurrBuff(), otz), poly_f4);
-      IncrementNextPrimitive(sizeof(POLY_F4));
+      addPrim(GetOTAt(GetCurrBuff(), otz), poly_ft4);
+      IncrementNextPrimitive(sizeof(POLY_FT4));
     }
   }
 

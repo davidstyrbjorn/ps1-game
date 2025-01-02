@@ -3,12 +3,12 @@ TYPE = ps-exe
 
 SRCS = \
 third_party/nugget/common/crt0/crt0.s \
-main.c \
-joypad.c \
-globals.c \
-display.c \
-camera.c \
-util.c
+src/main.c \
+src/joypad.c \
+src/globals.c \
+src/display.c \
+src/camera.c \
+src/util.c
 
 CPPFLAGS += -Ithird_party/psyq-iwyu/include
 LDFLAGS += -Lthird_party/psyq/lib

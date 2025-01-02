@@ -20,6 +20,7 @@
             <file name="SYSTEM.CNF"	type="data"	source="SYSTEM.TXT"/>
             <file name="MAIN.EXE"	type="data"	source="hello-gpu.ps-exe"/>
             <file name="MODEL.BIN"  type="data" source="assets\model.bin"/>
+            <file name="BRICKS.TIM"  type="data" source="assets\bricks.TIM"/>
             
             <!-- We can easily add subdirectories onto the disk by doing... this -->
             <!-- <dir name="SUBDIR01">
