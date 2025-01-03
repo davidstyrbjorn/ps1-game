@@ -14,6 +14,13 @@
 
 extern char __heap_start, __sp; // Nugget specific, needed for malloc to work
 
+typedef struct Texture
+{
+  u_long tim_mode; // pixel mode of the TIM
+  RECT tim_prect;  // store the X and Y location of the texture
+  RECT tim_crect;  // -||- CLUT
+} Texture;
+
 /*
     char c;  // -> 8 bits
     short s; // -> 16 bits
@@ -25,20 +32,11 @@ extern char __heap_start, __sp; // Nugget specific, needed for malloc to work
     u_long ul;  // -> unsigned 32 bits
 */
 
-const short FLOOR_SIZE = 600;
-
-typedef struct
-{
-  SVECTOR rotation;
-  VECTOR position;
-  VECTOR scale;
-  VECTOR velocity;
-  VECTOR acceleration;
-  SVECTOR vertices[8];
-  short faces[24];
-} Cube;
-
 Object object = {};
+Texture brick_texture;
+
+Object lava_object = {};
+Texture lava_texture;
 
 POLY_FT4 *poly_ft4;
 
@@ -47,11 +45,7 @@ Camera camera;
 MATRIX world = {0};
 MATRIX view = {0};
 
-u_long tim_mode; // pixel mode of the TIM
-RECT tim_prect;  // store the X and Y location of the texture
-RECT tim_crect;  // -||- CLUT
-
-void LoadModel(char *file_name)
+void LoadModel(char *file_name, Object *object)
 {
   // Start reading from the file
   u_long length;
@@ -59,39 +53,39 @@ void LoadModel(char *file_name)
 
   // Read vertices from buffer
   u_long b = 0; // Counter of bytes
-  object.num_vertices = GetShortBE(bytes, &b);
-  object.vertices = malloc3(object.num_vertices * sizeof(SVECTOR));
-  for (int i = 0; i < object.num_vertices; i++)
+  object->num_vertices = GetShortBE(bytes, &b);
+  object->vertices = malloc3(object->num_vertices * sizeof(SVECTOR));
+  for (int i = 0; i < object->num_vertices; i++)
   {
-    object.vertices[i].vx = GetShortBE(bytes, &b);
-    object.vertices[i].vy = GetShortBE(bytes, &b);
-    object.vertices[i].vz = GetShortBE(bytes, &b);
+    object->vertices[i].vx = GetShortBE(bytes, &b);
+    object->vertices[i].vy = GetShortBE(bytes, &b);
+    object->vertices[i].vz = GetShortBE(bytes, &b);
   }
 
   // Read indices from buffer
-  object.num_faces = GetShortBE(bytes, &b) * 4; // 4 indices per quad
-  object.faces = malloc3(object.num_faces * sizeof(short));
-  for (int i = 0; i < object.num_faces; i++)
+  object->num_faces = GetShortBE(bytes, &b) * 4; // 4 indices per quad
+  object->faces = malloc3(object->num_faces * sizeof(short));
+  for (int i = 0; i < object->num_faces; i++)
   {
-    object.faces[i] = GetShortBE(bytes, &b);
+    object->faces[i] = GetShortBE(bytes, &b);
   }
 
   // Read colors from buffer
-  object.num_colors = GetChar(bytes, &b);
-  object.colors = malloc3(object.num_colors * sizeof(CVECTOR));
-  for (int i = 0; i < object.num_colors; i++)
+  object->num_colors = GetChar(bytes, &b);
+  object->colors = malloc3(object->num_colors * sizeof(CVECTOR));
+  for (int i = 0; i < object->num_colors; i++)
   {
-    object.colors[i].r = GetChar(bytes, &b);
-    object.colors[i].g = GetChar(bytes, &b);
-    object.colors[i].b = GetChar(bytes, &b);
-    object.colors[i].cd = GetChar(bytes, &b);
+    object->colors[i].r = GetChar(bytes, &b);
+    object->colors[i].g = GetChar(bytes, &b);
+    object->colors[i].b = GetChar(bytes, &b);
+    object->colors[i].cd = GetChar(bytes, &b);
   }
 
   // Free the read file buffer
   free3(bytes);
 }
 
-void LoadTexture(char *file_name)
+Texture LoadTexture(char *file_name)
 {
   // Start reading from the file
   u_long length;
@@ -113,11 +107,13 @@ void LoadTexture(char *file_name)
     DrawSync(0);                     // Wait for copy to VRAM to complete
   }
 
-  tim_mode = tim.mode;
-  tim_prect = *tim.prect;
-  tim_crect = *tim.crect;
-
   free3(bytes);
+
+  return (Texture){
+      .tim_mode = tim.mode,
+      .tim_prect = *tim.prect,
+      .tim_crect = *tim.crect,
+  };
 }
 
 void Setup()
@@ -140,8 +136,15 @@ void Setup()
   setVector(&object.rotation, 0, 0, 0);
   setVector(&object.scale, ONE, ONE, ONE);
 
-  LoadModel("\\MODEL.BIN;1");
-  LoadTexture("\\BRICKS.TIM;1");
+  LoadModel("\\MODEL.BIN;1", &object);
+  brick_texture = LoadTexture("\\BRICKS.TIM;1");
+
+  setVector(&lava_object.position, 0, 200, 0);
+  setVector(&lava_object.rotation, 0, 0, 0);
+  setVector(&lava_object.scale, ONE * 4, ONE * 0.1, ONE * 4);
+
+  LoadModel("\\MODEL.BIN;1", &lava_object);
+  lava_texture = LoadTexture("\\LAVA.TIM;1");
 }
 
 short rotation_speed = ONE;
@@ -208,8 +211,8 @@ void Update()
     poly_ft4->u3 = 63;
     poly_ft4->v3 = 63;
 
-    poly_ft4->tpage = getTPage(tim_mode & 0x3, 0, tim_prect.x, tim_prect.y);
-    poly_ft4->clut = getClut(tim_crect.x, tim_crect.y);
+    poly_ft4->tpage = getTPage(brick_texture.tim_mode & 0x3, 0, brick_texture.tim_prect.x, brick_texture.tim_prect.y);
+    poly_ft4->clut = getClut(brick_texture.tim_crect.x, brick_texture.tim_crect.y);
 
     // This function will let us discard the polygon if it is ocluded (<= 0)
     int nclip =
@@ -229,6 +232,59 @@ void Update()
   }
 
   object.rotation.vy += 20;
+
+  RotMatrix(&lava_object.rotation, &world);
+  TransMatrix(&world, &lava_object.position);
+  ScaleMatrix(&world, &lava_object.scale);
+
+  // Combine world and look at matrix to get the... wait for it... view matrix
+  CompMatrixLV(&camera.look_at, &world, &view);
+
+  SetRotMatrix(&view);
+  SetTransMatrix(&view);
+
+  // Loop all faces of the object
+  for (int i = 0, q = 0; i < lava_object.num_faces; i += 4, q++)
+  {
+    poly_ft4 = (POLY_FT4 *)GetNextPrimitive();
+    SetPolyFT4(poly_ft4);
+
+    poly_ft4->r0 = 128;
+    poly_ft4->g0 = 128;
+    poly_ft4->b0 = 128;
+
+    // Setting our UV coordinates
+    poly_ft4->u0 = 0;
+    poly_ft4->v0 = 0;
+
+    poly_ft4->u1 = 63;
+    poly_ft4->v1 = 0;
+
+    poly_ft4->u2 = 0;
+    poly_ft4->v2 = 63;
+
+    poly_ft4->u3 = 63;
+    poly_ft4->v3 = 63;
+
+    poly_ft4->tpage = getTPage(lava_texture.tim_mode & 0x3, 0, lava_texture.tim_prect.x, lava_texture.tim_prect.y);
+    poly_ft4->clut = getClut(lava_texture.tim_crect.x, lava_texture.tim_crect.y);
+
+    // This function will let us discard the polygon if it is ocluded (<= 0)
+    int nclip =
+        RotAverageNclip4(&lava_object.vertices[lava_object.faces[i]], &lava_object.vertices[lava_object.faces[i + 1]],
+                         &lava_object.vertices[lava_object.faces[i + 2]], &lava_object.vertices[lava_object.faces[i + 3]], (long *)&poly_ft4->x0,
+                         (long *)&poly_ft4->x1, (long *)&poly_ft4->x2, (long *)&poly_ft4->x3, &p, &otz, &flag);
+    if (nclip <= 0)
+    {
+      continue; // Discard pixel
+    }
+
+    if ((otz > 0) && (otz < OT_LENGTH))
+    {
+      addPrim(GetOTAt(GetCurrBuff(), otz), poly_ft4);
+      IncrementNextPrimitive(sizeof(POLY_FT4));
+    }
+  }
 }
 
 void Render() { DisplayFrame(); }
